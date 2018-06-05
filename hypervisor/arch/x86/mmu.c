@@ -44,9 +44,17 @@ static struct vmx_capability {
 	uint32_t vpid;
 } vmx_caps;
 
+/*
+ * If the logical processor is in VMX non-root operation and
+ * the “enable VPID” VM-execution control is 1, the current VPID
+ * is the value of the VPID VM-execution control field in the VMCS.
+ * (VM entry ensures that this value is never 0000H).
+ */
+static int vmx_vpid_nr = VMX_MIN_NR_VPID;
+
 #define INVEPT_TYPE_SINGLE_CONTEXT      1UL
 #define INVEPT_TYPE_ALL_CONTEXTS        2UL
-#define INVEPT_SET_ERROR_CODE				\
+#define VMFAIL_INVALID_EPT_VPID				\
 	"       jnc 1f\n"				\
 	"       mov $1, %0\n"      /* CF: error = 1 */	\
 	"       jmp 3f\n"				\
@@ -61,12 +69,31 @@ struct invept_desc {
 	uint64_t _res;
 };
 
+static inline void _invvpid(uint64_t type, int vpid, uint64_t gva)
+{
+	int error = 0;
+
+	struct {
+		uint64_t vpid : 16;
+		uint64_t rsvd : 48;
+		uint64_t gva;
+	} operand = { vpid, 0, gva };
+
+	asm volatile ("invvpid %1, %2\n"
+			VMFAIL_INVALID_EPT_VPID
+			: "=r" (error)
+			: "m" (operand), "r" (type)
+			: "memory");
+
+	ASSERT(error == 0, "invvpid error");
+}
+
 static inline void _invept(uint64_t type, struct invept_desc desc)
 {
 	int error = 0;
 
 	asm volatile ("invept %1, %2\n"
-			INVEPT_SET_ERROR_CODE
+			VMFAIL_INVALID_EPT_VPID
 			: "=r" (error)
 			: "m" (desc), "r" (type)
 			: "memory");
@@ -103,12 +130,46 @@ int check_vmx_mmu_cap(void)
 		return -ENODEV;
 	}
 
-	if (!cpu_has_vmx_vpid_cap(VMX_VPID_INVVPID)) {
+	if (!cpu_has_vmx_vpid_cap(VMX_VPID_INVVPID) ||
+		!cpu_has_vmx_vpid_cap(VMX_VPID_INVVPID_SINGLE_CONTEXT) ||
+		!cpu_has_vmx_vpid_cap(VMX_VPID_INVVPID_GLOBAL_CONTEXT)) {
 		pr_fatal("%s, invvpid not supported\n", __func__);
 		return -ENODEV;
 	}
 
 	return 0;
+}
+
+int allocate_vpid(void)
+{
+	int vpid = atomic_xadd(&vmx_vpid_nr, 1);
+
+	/* TODO: vpid overflow */
+	if (vpid >= VMX_MAX_NR_VPID) {
+		pr_err("%s, vpid overflow\n", __func__);
+		/*
+		 * set vmx_vpid_nr to VMX_MAX_NR_VPID to disable vpid
+		 * since next atomic_xadd will always large than
+		 * VMX_MAX_NR_VPID.
+		 */
+		vmx_vpid_nr = VMX_MAX_NR_VPID;
+		vpid = 0;
+	}
+
+	return vpid;
+}
+
+void flush_vpid_single(int vpid)
+{
+	if (vpid == 0)
+		return;
+
+	_invvpid(VMX_VPID_TYPE_SINGLE_CONTEXT, vpid, 0);
+}
+
+void flush_vpid_global(void)
+{
+	_invvpid(VMX_VPID_TYPE_ALL_CONTEXT, 0, 0);
 }
 
 void invept(struct vcpu *vcpu)
