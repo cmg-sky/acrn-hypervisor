@@ -290,7 +290,11 @@ uart_mevent_teardown(void *param)
 static void
 uart_opentty(struct uart_vdev *uart)
 {
+	int ch;
+	
 	ttyopen(&uart->tty);
+	while ((ch = ttyread(&uart->tty)) != -1);
+
 	if (isatty(uart->tty.fd_in)) {
 		uart->mev = mevent_add(uart->tty.fd_in, EVF_READ,
 			uart_drain, uart, uart_mevent_teardown, uart);
