@@ -207,6 +207,17 @@ int32_t shutdown_vm(struct acrn_vm *vm)
 	struct acrn_vcpu *vcpu = NULL;
 	int32_t ret;
 
+#ifdef CONFIG_IOREQ_POLLING
+	/* Once we want to shutdown the vm, we should disable the
+	 * completion polling which happens on idle thread first.
+	 */
+	vm->sw.is_completion_polling = false;
+
+	/* fence here to make sure the is_completion_polling is
+	 * visible to other cores before we pause vm.
+	 */
+	cpu_memory_barrier();
+#endif
 	pause_vm(vm);
 
 	/* Only allow shutdown paused vm */

@@ -346,7 +346,6 @@ int32_t create_vcpu(uint16_t pcpu_id, struct acrn_vm *vm, struct acrn_vcpu **rtn
 	/* Initialize CPU ID for this VCPU */
 	vcpu->vcpu_id = vcpu_id;
 	vcpu->pcpu_id = pcpu_id;
-	per_cpu(ever_run_vcpu, pcpu_id) = vcpu;
 
 	/* Initialize the parent VM reference */
 	vcpu->vm = vm;
@@ -602,6 +601,8 @@ void schedule_vcpu(struct acrn_vcpu *vcpu)
 {
 	vcpu->state = VCPU_RUNNING;
 	pr_dbg("vcpu%hu scheduled", vcpu->vcpu_id);
+
+	per_cpu(ever_run_vcpu, vcpu->pcpu_id) = vcpu;
 
 	get_schedule_lock(vcpu->pcpu_id);
 	add_vcpu_to_runqueue(vcpu);
