@@ -17,7 +17,7 @@
 /*
  * Debug printf
  */
-static int ioc_cbc_debug;
+static int ioc_cbc_debug = 1;
 static FILE *dbg_file;
 #define DPRINTF(format, arg...) \
 do { if (ioc_cbc_debug && dbg_file) { fprintf(dbg_file, format, arg);\
@@ -43,7 +43,7 @@ cbc_copy_to_ring(const uint8_t *buf, size_t size, struct cbc_ring *ring)
 
 			ring->tail = pos;
 		} else {
-			WPRINTF("ioc cbc ring buffer is full!!\r\n");
+			DPRINTF("%s", "ioc cbc ring buffer is full!!\r\n");
 			return -1;
 		}
 	}
@@ -565,6 +565,7 @@ cbc_update_heartbeat(struct cbc_pkt *pkt, uint8_t cmd, uint8_t sus_action)
 {
 	enum ioc_event_type evt;
 
+	DPRINTF("heartbeat, cmd:%d, sus action:%d\n", cmd, sus_action);
 	if (cmd == CBC_HB_INITIAL || cmd == CBC_HB_ACTIVE ||
 			cmd == CBC_HB_STANDBY ||
 			cmd == CBC_HB_SD_DLY)
@@ -577,6 +578,7 @@ cbc_update_heartbeat(struct cbc_pkt *pkt, uint8_t cmd, uint8_t sus_action)
 
 	/* Update IOC state with a new event */
 	if (evt != pkt->evt) {
+		DPRINTF("update event from:%d->%d\r\n", pkt->evt, evt);
 		ioc_update_event(pkt->ioc->evt_fd, evt);
 		pkt->evt = evt;
 	}
@@ -596,7 +598,7 @@ cbc_update_heartbeat(struct cbc_pkt *pkt, uint8_t cmd, uint8_t sus_action)
  * from IOC firmware, IOC boot/resume reason, heartbeat state changing.
  */
 static void
-cbc_update_wakeup_reason(struct cbc_pkt *pkt, uint32_t reason)
+cbc_update_wakeup_reason(struct cbc_pkt *pkt, uint32_t reason, int s)
 {
 	uint8_t *payload;
 
@@ -619,6 +621,7 @@ cbc_update_wakeup_reason(struct cbc_pkt *pkt, uint32_t reason)
 	pkt->req->buf[CBC_SRV_POS] = CBC_SC_WK_RSN;
 	pkt->req->srv_len = 4;
 	pkt->req->link_len = 0;
+	DPRINTF("wakup reason: 0x%x, s:%d\n", reason, s);
 }
 
 /*
@@ -663,7 +666,7 @@ cbc_process_wakeup_reason(struct cbc_pkt *pkt)
 	}
 
 	/* Update periodic wakeup reason */
-	cbc_update_wakeup_reason(pkt, reason);
+	cbc_update_wakeup_reason(pkt, reason, 1);
 
 	/* Send wakeup reason */
 	cbc_send_pkt(pkt);
@@ -675,6 +678,7 @@ cbc_process_wakeup_reason(struct cbc_pkt *pkt)
 static void
 cbc_update_rtc_timer(uint16_t value, uint8_t unit)
 {
+	DPRINTF("RTC, value:%d, unit=%d\n", value, unit);
 	time_t timestamp = 0;
 
 	if (!value) {
@@ -725,8 +729,7 @@ cbc_process_heartbeat(struct cbc_pkt *pkt)
 		uint16_t timer = payload[0] | payload[1] << 8;
 
 		cbc_update_rtc_timer(timer, payload[2]);
-	}
-
+	} else
 	DPRINTF("ioc discards the lifecycle rx cmd: %d\r\n", cmd);
 }
 
@@ -903,7 +906,8 @@ send_wakeup_reason_of_vm_request(struct cbc_pkt *pkt)
 		return false;
 	}
 
-	cbc_update_wakeup_reason(pkt, reason);
+	DPRINTF("process vm request:%d, reason:0x%x\r\n", pkt->ioc->vm_req, reason);
+	cbc_update_wakeup_reason(pkt, reason, 2);
 	cbc_send_pkt(pkt);
 	return true;
 }
@@ -943,20 +947,20 @@ cbc_tx_handler(struct cbc_pkt *pkt)
 		 * boot command line or resume callback.
 		 */
 		cbc_update_wakeup_reason(pkt, pkt->ioc->boot_reason |
-				CBC_WK_RSN_SOC);
+				CBC_WK_RSN_SOC, 3);
 		cbc_send_pkt(pkt);
 
 		/* Heartbeat init also indicates UOS enter active state */
 		pkt->uos_active = true;
 	} else if (pkt->req->rtype == CBC_REQ_T_UOS_ACTIVE) {
 		cbc_update_wakeup_reason(pkt, pkt->ioc->boot_reason |
-				CBC_WK_RSN_SOC);
+				CBC_WK_RSN_SOC, 4);
 		cbc_send_pkt(pkt);
 
 		/* Enable UOS active flag */
 		pkt->uos_active = true;
 	} else if (pkt->req->rtype == CBC_REQ_T_UOS_INACTIVE) {
-		cbc_update_wakeup_reason(pkt, CBC_WK_RSN_SHUTDOWN);
+		cbc_update_wakeup_reason(pkt, CBC_WK_RSN_SHUTDOWN, 5);
 
 		cbc_send_pkt(pkt);
 

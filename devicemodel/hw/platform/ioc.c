@@ -70,10 +70,10 @@
 #include "monitor.h"
 
 /* For debugging log to a file */
-static int ioc_debug;
+static int ioc_debug = 1;
 static FILE *dbg_file;
 #define IOC_LOG_INIT do { if (ioc_debug) {\
-	dbg_file = fopen("/tmp/ioc_log", "w+");\
+	dbg_file = fopen("/root/ioc_log", "w+");\
 if (!dbg_file)\
 	printf("ioc log open failed\r\n"); else cbc_set_log_file(dbg_file);\
 } } while (0)
@@ -235,8 +235,8 @@ static struct ioc_ch_info ioc_ch_tbl[] = {
 	{IOC_INIT_FD, IOC_NP_RAW9,  IOC_NATIVE_RAW9,	IOC_CH_ON},
 	{IOC_INIT_FD, IOC_NP_RAW10, IOC_NATIVE_RAW10,	IOC_CH_ON},
 	{IOC_INIT_FD, IOC_NP_RAW11, IOC_NATIVE_RAW11,	IOC_CH_ON},
-	{IOC_INIT_FD, IOC_DP_NONE,  IOC_VIRTUAL_UART,	IOC_CH_ON},
-	{IOC_INIT_FD, IOC_DP_NONE,  IOC_LOCAL_EVENT,	IOC_CH_ON}
+	{IOC_INIT_FD, "virtual",    IOC_VIRTUAL_UART,	IOC_CH_ON},
+	{IOC_INIT_FD, "local",	    IOC_LOCAL_EVENT,	IOC_CH_ON}
 #ifdef IOC_DUMMY
 	{IOC_INIT_FD, IOC_NP_FLF,   IOC_NATIVE_DUMMY0,	IOC_CH_ON},
 	{IOC_INIT_FD, IOC_NP_FSIG,  IOC_NATIVE_DUMMY1,	IOC_CH_ON},
@@ -662,7 +662,7 @@ ioc_ch_recv(enum ioc_ch_id id, uint8_t *buf, size_t size)
 	 * If change epoll work mode to ET, need to handle EAGAIN.
 	 */
 	if (count < 0) {
-		DPRINTF("ioc read bytes error:%s\r\n", strerror(errno));
+		//DPRINTF("ioc read bytes error:%s\r\n", strerror(errno));
 		return -1;
 	}
 	return count;
@@ -689,7 +689,7 @@ ioc_ch_xmit(enum ioc_ch_id id, const uint8_t *buf, size_t size)
 		 * If change epoll work mode to ET, need to handle EAGAIN.
 		 */
 		if (rc < 0) {
-			DPRINTF("ioc write error:%s\r\n", strerror(errno));
+			//DPRINTF("ioc write error:%s\r\n", strerror(errno));
 			break;
 		}
 		count += rc;
@@ -984,6 +984,7 @@ process_ram_refresh_event(struct ioc_dev *ioc)
 {
 	int rc;
 
+	DPRINTF("%s", "process S3 event enter\r\n");
 	/* Rx and Tx threads discard all CBC protocol packets */
 	ioc->cbc_enable = false;
 
@@ -996,6 +997,7 @@ process_ram_refresh_event(struct ioc_dev *ioc)
 	/*
 	 * TODO: set suspend to PM DM
 	 */
+	DPRINTF("%s", "process S3 event exit\r\n");
 
 	return rc;
 }
@@ -1008,6 +1010,7 @@ process_hb_inactive_event(struct ioc_dev *ioc)
 {
 	int rc;
 
+	DPRINTF("%s", "process S5 event enter\r\n");
 	/* Rx and Tx threads discard all CBC protocol packets */
 	ioc->cbc_enable = false;
 
@@ -1020,6 +1023,7 @@ process_hb_inactive_event(struct ioc_dev *ioc)
 	/*
 	 * TODO: set shutdown to PM DM
 	 */
+	DPRINTF("%s", "process S5 event exit\r\n");
 
 	return rc;
 }
@@ -1032,7 +1036,9 @@ process_shutdown_event(struct ioc_dev *ioc)
 {
 	int i;
 	struct ioc_ch_info *chl;
+	int rc;
 
+	DPRINTF("%s", "shutdown enter\r\n");
 	/*
 	 * Due to native CBC driver buffer will be full if the native CBC char
 	 * devices are opened, but not keep reading. So close the native devices
@@ -1043,13 +1049,17 @@ process_shutdown_event(struct ioc_dev *ioc)
 		case IOC_NATIVE_PMT ... IOC_NATIVE_RAW11:
 			if (chl->stat == IOC_CH_OFF || chl->fd < 0)
 				continue;
-			epoll_ctl(ioc->epfd, EPOLL_CTL_DEL, chl->fd, NULL);
+			DPRINTF("close channel name:%s,fd:%d\n", chl->name, chl->fd);
+			rc = epoll_ctl(ioc->epfd, EPOLL_CTL_DEL, chl->fd, NULL);
+			if (rc < 0)
+				DPRINTF("epoll ctl del fail:%s, rc:%d\n", strerror(errno), rc);
 			close(chl->fd);
 			chl->fd = IOC_INIT_FD;
 			break;
 		}
 	}
 
+	DPRINTF("%s", "shutdown exit\r\n");
 	return 0;
 }
 
@@ -1061,6 +1071,7 @@ process_resume_event(struct ioc_dev *ioc)
 {
 	int i;
 	struct ioc_ch_info *chl;
+	DPRINTF("%s", "process resume event enter\r\n");
 
 	/* Rx and Tx threads begin to process CBC protocol packets */
 	ioc->cbc_enable = true;
@@ -1073,9 +1084,17 @@ process_resume_event(struct ioc_dev *ioc)
 				continue;
 
 			chl->fd = ioc_open_native_ch(chl->name);
-			if (chl->fd > 0)
-				epoll_ctl(ioc->epfd, EPOLL_CTL_ADD, chl->fd,
+			DPRINTF("reopen channel name:%s,fd:%d\n", chl->name, chl->fd);
+			if (chl->fd > 0) {
+				int rc;
+				rc = epoll_ctl(ioc->epfd, EPOLL_CTL_ADD, chl->fd,
 						&ioc->evts[i]);
+				if (rc < 0)
+					DPRINTF("epoll ctl add fd %d failed, name: %s, error: %s\r\n",
+							chl->fd,
+							chl->name,
+							strerror(errno));
+			}
 			else
 				DPRINTF("ioc open failed, channel:%s\r\n",
 						chl->name);
@@ -1092,6 +1111,7 @@ process_resume_event(struct ioc_dev *ioc)
 				sizeof(cbc_open_channel_command)) <= 0)
 		DPRINTF("%s", "ioc reopen signal channel failed\r\n");
 
+	DPRINTF("%s", "process resume event exit\r\n");
 	return 0;
 }
 
@@ -1104,6 +1124,7 @@ ioc_process_events(struct ioc_dev *ioc, enum ioc_ch_id id)
 	int i;
 	uint8_t evt;
 
+	DPRINTF("%s", "ioc_process_events enter\r\n");
 	/* Get one event */
 	if (ioc_ch_recv(id, &evt, sizeof(evt)) < 0) {
 		DPRINTF("%s", "ioc state gets event failed\r\n");
@@ -1114,6 +1135,7 @@ ioc_process_events(struct ioc_dev *ioc, enum ioc_ch_id id)
 	if (evt == IOC_E_KNOCK)
 		return;
 
+	DPRINTF("state=%d gets event=%d\r\n", ioc->state, evt);
 	for (i = 0; i < ARRAY_SIZE(ioc_state_tbl); i++) {
 		if (evt == ioc_state_tbl[i].evt &&
 				ioc->state == ioc_state_tbl[i].cur_stat) {
@@ -1125,7 +1147,14 @@ ioc_process_events(struct ioc_dev *ioc, enum ioc_ch_id id)
 						ioc_state_tbl[i].cur_stat,
 						ioc_state_tbl[i].next_stat);
 		}
+		else
+			DPRINTF("ioc state switching failed, %d->%d, next:%d\r\n",
+					evt,
+					ioc_state_tbl[i].cur_stat,
+					ioc_state_tbl[i].next_stat);
 	}
+
+	DPRINTF("%s", "ioc_process_events exit\r\n");
 }
 
 /*
@@ -1156,7 +1185,7 @@ ioc_build_request(struct ioc_dev *ioc, int32_t link_len, int32_t srv_len)
 
 	req = cbc_request_dequeue(ioc, CBC_QUEUE_T_FREE);
 	if (!req) {
-		WPRINTF(("ioc queue is full!!, drop the data\n\r"));
+		DPRINTF("%s", "ioc queue is full!!, drop the data\n\r");
 		return;
 	}
 	for (i = 0; i < link_len; i++) {
@@ -1201,7 +1230,7 @@ ioc_process_tx(struct ioc_dev *ioc, enum ioc_ch_id id)
 
 	req = cbc_request_dequeue(ioc, CBC_QUEUE_T_FREE);
 	if (!req) {
-		WPRINTF("ioc free queue is full!!, drop the data\r\n");
+		DPRINTF("%s", "ioc free queue is full!!, drop the data\r\n");
 		return -1;
 	}
 
@@ -1521,6 +1550,7 @@ vm_resume_handler(void *arg)
 	struct ioc_dev *ioc = arg;
 	uint32_t reason;
 
+	DPRINTF("%s", "vm resume enter\r\n");
 	if (!ioc) {
 		DPRINTF("%s", "ioc vm resume gets NULL pointer\r\n");
 		return -1;
@@ -1540,6 +1570,7 @@ vm_resume_handler(void *arg)
 
 	ioc->boot_reason = reason;
 	ioc_update_event(ioc->evt_fd, IOC_E_RESUME);
+	DPRINTF("vm resume exit, boot up reason:0x%x\r\n", ioc->boot_reason);
 	return 0;
 }
 
@@ -1742,6 +1773,7 @@ ioc_init(struct vmctx *ctx)
 		goto work_err;
 
 	ctx->ioc_dev = ioc;
+	DPRINTF("%s", "=== ioc init ===\n");
 	return 0;
 
 work_err:
@@ -1774,6 +1806,7 @@ ioc_deinit(struct vmctx *ctx)
 {
 	struct ioc_dev *ioc = ctx->ioc_dev;
 
+	DPRINTF("%s", "=== ioc deinit ===\n");
 	if (!ioc) {
 		DPRINTF("%s", "ioc deinit parameter is NULL\r\n");
 		return;
