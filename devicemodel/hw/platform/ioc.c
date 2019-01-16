@@ -68,6 +68,7 @@
 #include "ioc.h"
 #include "vmmapi.h"
 #include "monitor.h"
+#include "dm_kmsg.h"
 
 /* For debugging log to a file */
 static int ioc_debug = 1;
@@ -1520,6 +1521,7 @@ vm_stop_handler(void *arg)
 		return -1;
 	}
 	ioc->vm_req = VM_REQ_STOP;
+	write_kmsg("vm stop from ioc");
 	return 0;
 }
 
@@ -1537,6 +1539,8 @@ vm_suspend_handler(void *arg)
 		return -1;
 	}
 	ioc->vm_req = VM_REQ_SUSPEND;
+	
+	write_kmsg("vm suspend from ioc");
 	return 0;
 }
 

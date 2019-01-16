@@ -13,7 +13,7 @@
 
 #include "ioc.h"
 #include "monitor.h"
-
+#include "dm_kmsg.h"
 /*
  * Debug printf
  */
@@ -907,6 +907,8 @@ send_wakeup_reason_of_vm_request(struct cbc_pkt *pkt)
 	}
 
 	DPRINTF("process vm request:%d, reason:0x%x\r\n", pkt->ioc->vm_req, reason);
+	write_kmsg("process vm request:%d, reason:0x%x\r\n", pkt->ioc->vm_req, reason);
+
 	cbc_update_wakeup_reason(pkt, reason, 2);
 	cbc_send_pkt(pkt);
 	return true;

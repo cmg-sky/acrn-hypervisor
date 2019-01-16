@@ -42,6 +42,8 @@
 
 #include "mevent.h"
 #include "vmmapi.h"
+#include "dm_kmsg.h"
+
 
 #define	MEVENT_MAX	64
 
@@ -439,7 +441,10 @@ mevent_dispatch(void)
 		suspend_mode = vm_get_suspend_mode();
 		if ((suspend_mode != VM_SUSPEND_NONE) &&
 		    (suspend_mode != VM_SUSPEND_SYSTEM_RESET) &&
-		    (suspend_mode != VM_SUSPEND_SUSPEND))
+		    (suspend_mode != VM_SUSPEND_SUSPEND)) {
+
+			write_kmsg("dm suspend: %d", suspend_mode);
 			break;
+		}
 	}
 }

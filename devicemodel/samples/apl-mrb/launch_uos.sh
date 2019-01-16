@@ -211,6 +211,7 @@ vm_ps=$(pgrep -a -f acrn-dm)
 result=$(echo $vm_ps | grep "${vm_name}")
 if [[ "$result" != "" ]]; then
   echo "$vm_name is running, can't create twice!"
+   echo "$vm_name is running, can't create twice!" > /dev/kmsg
   exit
 fi
 

@@ -644,6 +644,7 @@ vm_loop(struct vmctx *ctx)
 
 		if (VM_SUSPEND_FULL_RESET == vm_get_suspend_mode() ||
 		    VM_SUSPEND_POWEROFF == vm_get_suspend_mode()) {
+		    	write_kmsg("vm exit %d", vm_get_suspend_mode);
 			break;
 		}
 
